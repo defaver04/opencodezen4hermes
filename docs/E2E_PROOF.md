@@ -179,3 +179,71 @@ that config, the dashboard resolves a selected id to the pack's own sidecar, and
 a real completion comes back. The strongest single check of the whole project is
 that the assembled text — requested as `WEBUI OK` — arrived intact from a free
 model, through an unpacked 219 MB artefact, with no API key.
+
+## Repeating it on the current release, checksum first
+
+The section above used `pack-20261019-2141`, which predates two fixes. To make
+sure the *currently published* release is what a new user receives, the whole
+chain was repeated from scratch against `pack-local-20261019-2230-sumfix`, the
+release that `/releases/latest` now redirects to. Nothing was reused from earlier
+runs: fresh download folder, fresh extraction, fresh `HERMES_HOME`, new ports.
+
+```
+sha256sum -c --strict SHA256SUMS
+hermes-webui-agent-v0.52.458-v2026.9.24-linux-arm64.tar.gz: OK
+```
+
+The recorded line is a bare filename — no `dist/` prefix — so the command a user
+actually types works outside the build tree. That was finding H.
+
+Launcher, on ports 8901/8803:
+
+```
+2026-10-19T22:40:21Z [launcher] step 1/3 sidecar silent at http://127.0.0.1:8803 — starting it detached
+2026-10-19T22:40:31Z [launcher] step 1/3 sidecar up at http://127.0.0.1:8803
+2026-10-19T22:40:31Z [launcher] step 2/3 seeding providers.opencode-zen-free on port 8803
+opencode-zen-free: created  (/tmp/finaltest/config.yaml)
+  http://127.0.0.1:8803/v1
+2026-10-19T22:40:33Z [launcher] step 2/3 config seed ok
+2026-10-19T22:40:33Z [launcher] step 3/3 exec bootstrap.py with HERMES_WEBUI_PORT=8901
+[bootstrap] Web UI is ready: http://localhost:8901
+```
+
+`GET /api/models` after the catalogue settled returned the display name and the
+human labels, not the slug fallback:
+
+```
+group: 'opencode-zen-free'  label='OpenCode Zen (free)'  models=9
+    beam-free                    | Beam Free
+    big-pickle                   | BIG Pickle
+    deepseek-v4.1-flash-free     | Deepseek V4.1 Flash Free
+    glm-5.3-flash-free           | GLM 5.3 Flash Free
+    longcat-2.5-preview-free     | Longcat 2.5 Preview Free
+    mimo-v2.6-flash-free         | Mimo V2.6 Flash Free
+    minimax-m3.1-flash-free      | Minimax M3.1 Flash Free
+    nemotron-3.5-lightning-free  | Nemotron 3.5 Lightning Free
+    nemotron-3.5-super-vl-free   | Nemotron 3.5 Super VL Free
+```
+
+Note that this call took 18.7 s on the cold path and returned the *fallback*
+label. The next one returned `OpenCode Zen (free)`. Both behaviours are upstream's
+stale-while-revalidate, documented above; the point of quoting the timing is that
+a slow first `/api/models` is expected, not a hang.
+
+Selection and inference, resolving the id exactly as the frontend does when a
+user clicks an entry:
+
+```
+resolve_model_provider('@opencode-zen-free:deepseek-v4.1-flash-free')
+  -> ('deepseek-v4.1-flash-free', 'opencode-zen-free', 'http://127.0.0.1:8803/v1')
+resolve_model_provider('deepseek-v4.1-flash-free')        # unqualified
+  -> ('deepseek-v4.1-flash-free', '', None)
+
+POST http://127.0.0.1:8803/v1/chat/completions  ->  http: 200
+assembled text: 'FINAL PACK OK'
+DONE frame received
+```
+
+That is the full user story on the release anyone downloading today would get:
+verify the checksum, untar, start, see the group, pick a model, read the answer.
+
