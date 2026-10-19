@@ -23,8 +23,9 @@ fixed. Nothing is listed as "known issue" that could be fixed in the same pass.
 | E | SHOULD-FIX | `docs/ARCHITECTURE.md` claimed `_handle_messages` resolved the model against the catalog; the code (and a test) said otherwise | **Fixed** |
 | F | NIT | The tarball is never extracted and booted in CI; the only runtime assertion is a `grep` on one file | Documented |
 | G | NIT | The launcher's final `exec` of a missing/non-executable interpreter surfaces as a raw shell error | Documented |
+| H | SHOULD-FIX | The published `SHA256SUMS` recorded the builder's `dist/` path, so `sha256sum -c` failed for every user — and exited 0 while doing it | **Fixed** |
 
-Test suite after the fixes: **408 tests, 0 failures, 0 errors, 38 skipped**
+Test suite after the fixes: **414 tests, 0 failures, 0 errors, 38 skipped**
 (`python3 -m unittest discover -s tests`). Before the work in this review the
 same tree ran 388 tests with 1 failure and 1 error.
 
@@ -66,7 +67,7 @@ It is stale-while-revalidate, not refresh-on-read:
 **Evidence.** `tests/test_catalog.py::MaybeRefreshTest` (7 tests) and
 `tests/test_server.py::CatalogRefreshWiringTests` (3 tests), which pin the
 wiring itself, including that `/healthz` does *not* trip the hook. Full suite:
-408 tests green.
+414 tests green.
 
 ## B — `/v1/messages` bypassed the free-roster gate (BLOCKER, fixed)
 
@@ -198,6 +199,51 @@ right (the launcher's contract is "best effort, never fatal"), but the user sees
 a raw shell error rather than a sentence telling them the pack is incomplete.
 `docs/TROUBLESHOOTING.md` covers the case; a one-line pre-flight check with a
 better message would be an improvement.
+
+---
+
+## H — The published `SHA256SUMS` did not verify (SHOULD-FIX, fixed)
+
+**How it was found.** Not by reading code. By downloading the published asset and
+doing what a user does:
+
+```
+sha256sum -c SHA256SUMS
+sha256sum: dist/hermes-webui-agent-…tar.gz: No such file or directory
+sha256sum: WARNING: 1 listed file could not be read
+EXIT=0
+```
+
+The hash itself was correct — it matched the tarball byte for byte. The
+*filename inside the file* was the builder's path, because upstream
+`build.sh:220` ran `sha256sum "$OUT_DIR/$TARBALL_NAME" > "$OUT_DIR/SHA256SUMS"`.
+In a download folder there is no `dist/`, so the check fails.
+
+**Why it is worth a fix rather than a note.** A checksum file whose check fails
+for every user is worse than none: it trains people to ignore the failure. And it
+fails *quietly* — `sha256sum -c` exits 0 on a missing file unless `--strict` is
+given, so even this file's own tests would have passed had they only checked the
+exit code. Both traps are the same class of mistake this review is looking for:
+a verification step that cannot fail is not a verification step.
+
+**Fixed** at `build.sh:266`, by `cd`-ing into `OUT_DIR` so only the bare filename
+is recorded.
+
+**Guarded** by `TestChecksumFile` in `tests/test_pack_install.py`, and both tests
+were validated against the defect, not only against the fix:
+
+- `test_the_checksum_line_records_a_relative_name` — static guard on the command.
+- `test_the_checksum_verifies_from_a_download_folder` — runs the real line from
+  `build.sh`, copies the two outputs into a *different* directory, then runs
+  `sha256sum -c --strict` there and requires exit 0 and an `OK` line.
+
+Reverting `build.sh:266` to the upstream form makes both fail; restoring it makes
+both pass. `bash -n` cannot catch this class — the line is valid shell either
+way, and the damage only appears in another working directory.
+
+**Doc consequence:** `README.md` and `docs/INSTALL.md` now tell users to pass
+`--strict`, explain why, and state that releases built before the fix — including
+`pack-local-20261019-2157-namecheck` — still carry the `dist/` prefix.
 
 ---
 
