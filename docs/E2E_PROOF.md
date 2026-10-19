@@ -113,10 +113,13 @@ the same thing.
 
 Everything above was measured from the development checkout. The claim a user
 actually cares about — *unpack the tarball, start it, pick a model, get an
-answer* — was verified separately against the published arm64 artefact
-`pack-local-20261019-2157-namecheck`
-(`hermes-webui-agent-v0.52.458-v2026.9.24-linux-arm64.tar.gz`, 219 MB),
-extracted to `/tmp/packtest`.
+answer* — was verified separately against the published arm64 artefact from
+release `pack-20261019-2141`
+(`hermes-webui-agent-v0.52.458-v2026.9.24--linux-arm64.tar.gz`, 219 650 397 bytes,
+sha256 `9d1da51b41172bdd5aedef09bf974c29c9d2ea44c06332a66d598d6bef3029ef`),
+extracted to `/tmp/packtest`. Note the double dash in that filename: this release
+predates the `VER_ID` fix in `878c404`, and the name is quoted exactly as
+published rather than tidied to match the current build.
 
 The launcher's own log, with the state directory redirected and both ports
 moved off their defaults to prove nothing was quietly relying on a previous run:
