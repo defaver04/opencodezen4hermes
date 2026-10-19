@@ -104,8 +104,75 @@ the same thing.
   trace.
 - **That every model suits every task.** Nine models answered a one-word prompt
   and one tool call. This is a reachability proof, not a quality benchmark.
-- **That the WebUI renders the dropdown from this run.** The picker reads the
+- **That the WebUI renders the dropdown from *this* run.** The picker reads the
   config seed, not the sidecar; that link is proven separately by
-  `tests/test_picker_integration.py` (and was established by hand before it —
-  with the seed, `get_available_models()` returns one group of nine; without it,
-  `groups: []`).
+  `tests/test_picker_integration.py`. A later run against a real extracted pack
+  covered it end to end — see the next section.
+
+## The booted pack, not just the source tree
+
+Everything above was measured from the development checkout. The claim a user
+actually cares about — *unpack the tarball, start it, pick a model, get an
+answer* — was verified separately against the published arm64 artefact
+`pack-local-20261019-2157-namecheck`
+(`hermes-webui-agent-v0.52.458-v2026.9.24-linux-arm64.tar.gz`, 219 MB),
+extracted to `/tmp/packtest`.
+
+The launcher's own log, with the state directory redirected and both ports
+moved off their defaults to prove nothing was quietly relying on a previous run:
+
+```
+2026-10-19T22:04:41Z [launcher] step 1/3 sidecar silent at http://127.0.0.1:8802 — starting it detached
+2026-10-19T22:04:48Z [launcher] step 1/3 sidecar up at http://127.0.0.1:8802
+2026-10-19T22:04:48Z [launcher] step 2/3 seeding providers.opencode-zen-free on port 8802
+opencode-zen-free: created  (/tmp/webtest/config.yaml)
+  http://127.0.0.1:8802/v1
+2026-10-19T22:04:49Z [launcher] step 2/3 config seed ok
+2026-10-19T22:04:49Z [launcher] step 3/3 exec bootstrap.py with HERMES_WEBUI_PORT=8899
+[bootstrap] Web UI is ready: http://localhost:8899
+```
+
+`GET http://127.0.0.1:8899/api/models` — the endpoint the dropdown calls —
+returned one group of nine:
+
+```
+active_provider: None
+groups         : 1
+  - opencode-zen-free      9 models
+        beam-free
+        big-pickle
+        deepseek-v4.1-flash-free
+        glm-5.3-flash-free
+        longcat-2.5-preview-free
+        mimo-v2.6-flash-free
+        minimax-m3.1-flash-free
+        nemotron-3.5-lightning-free
+        nemotron-3.5-super-vl-free
+```
+
+Two details from that run are worth recording because they look like defects and
+are not. **First**, the very first `/api/models` call labelled the group
+`Opencode Zen Free` (the slug, title-cased); every call after it, seconds later,
+said `OpenCode Zen (free)` — the plugin's real display name. That is upstream's
+stale-while-revalidate catalog: the first request past the 4 s rebuild budget
+serves a static fallback and triggers the rebuild out of band. The label is
+cosmetic and self-corrects, but a test asserting the display name on a cold first
+call would flake. **Second**, `active_provider` is `None` because this throwaway
+`HERMES_HOME` has no `model:` block — the seed deliberately does not write one,
+since choosing a user's default model is not this project's call.
+
+Routing, then inference, both through the pack:
+
+```
+resolve_model_provider('@opencode-zen-free:deepseek-v4.1-flash-free')
+  -> ('deepseek-v4.1-flash-free', 'opencode-zen-free', 'http://127.0.0.1:8802/v1')
+POST {base}/chat/completions  ->  http: 200
+assembled: 'WEBUI OK'
+```
+
+So the pack venv (PyYAML 6.0.3, httpx 0.28.1, relocated `.pyroot`) starts the
+sidecar, the launcher seeds a fresh config, the WebUI serves the dropdown from
+that config, the dashboard resolves a selected id to the pack's own sidecar, and
+a real completion comes back. The strongest single check of the whole project is
+that the assembled text — requested as `WEBUI OK` — arrived intact from a free
+model, through an unpacked 219 MB artefact, with no API key.
