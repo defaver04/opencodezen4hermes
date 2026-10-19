@@ -251,7 +251,10 @@ fi
 log "ukuran stage: $(du -sm "$STAGE" | cut -f1) MB"
 log "per-dir stage:"
 du -sm "$STAGE"/* "$STAGE"/.[!.]* 2>/dev/null || true
-VER_ID="$(echo "${WEBUI_REF}-${AGENT_REF}" | tr -c 'a-zA-Z0-9._-' '-')"
+# printf, bukan echo: `tr -c` juga memetakan newline penutup echo menjadi '-',
+# sehingga VER_ID berakhir dengan '-' dan nama tarball menjadi "...--linux-arm64".
+# Upstream memakai echo; itu bug kosmetik yang ikut terbawa ke nama artefak rilis.
+VER_ID="$(printf '%s' "${WEBUI_REF}-${AGENT_REF}" | tr -c 'a-zA-Z0-9._-' '-')"
 TARBALL_NAME="hermes-webui-agent-${VER_ID}-linux-arm64.tar.gz"
 # --exclude node_modules sebagai lapis kedua (rm -rf di atas + guard).
 tar -czf "$OUT_DIR/$TARBALL_NAME" --exclude='node_modules' -C "$STAGE" .

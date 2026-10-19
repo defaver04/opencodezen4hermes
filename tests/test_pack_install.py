@@ -665,5 +665,58 @@ class TestDefaultsAndValidation(PackInstallTestBase):
         self.assertEqual(sidecar_config.DEFAULT_PORT, pack_install.DEFAULT_SIDECAR_PORT)
 
 
+class TestTarballName(unittest.TestCase):
+    """The released artefact name is user-facing, so pin its shape.
+
+    Upstream built ``VER_ID`` with ``echo "$WEBUI_REF-$AGENT_REF" | tr -c ...``.
+    ``tr -c`` maps *every* non-matching byte, including ``echo``'s trailing
+    newline, so ``VER_ID`` ended in ``-`` and the tarball was named
+    ``...v2026.9.24--linux-arm64.tar.gz``. A stray dash is cosmetic until
+    someone scripts against the published name, and then it is a broken glob.
+    """
+
+    def _ver_id(self, webui_ref: str, agent_ref: str) -> str:
+        """Evaluate build.sh's VER_ID expression exactly as the shell does."""
+        expr = self._extract_ver_id_expression()
+        completed = subprocess.run(
+            ["bash", "-c", f'WEBUI_REF={webui_ref!r}; AGENT_REF={agent_ref!r}; {expr}; printf %s "$VER_ID"'],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return completed.stdout
+
+    @staticmethod
+    def _extract_ver_id_expression() -> str:
+        """Pull the real assignment out of build.sh rather than duplicating it."""
+        for raw in (REPO_ROOT / "build.sh").read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if line.startswith("VER_ID="):
+                return line
+        raise AssertionError("build.sh has no VER_ID assignment to test")
+
+    def test_the_ver_id_has_no_trailing_dash(self):
+        ver_id = self._ver_id("v0.52.458", "v2026.9.24")
+        self.assertEqual(ver_id, "v0.52.458-v2026.9.24")
+        self.assertFalse(ver_id.endswith("-"), f"VER_ID ends with a dash: {ver_id!r}")
+
+    def test_the_tarball_name_is_clean(self):
+        ver_id = self._ver_id("v0.52.458", "v2026.9.24")
+        name = f"hermes-webui-agent-{ver_id}-linux-arm64.tar.gz"
+        self.assertEqual(name, "hermes-webui-agent-v0.52.458-v2026.9.24-linux-arm64.tar.gz")
+        self.assertNotIn("--", name)
+
+    def test_the_assignment_does_not_use_echo(self):
+        """The bug was ``echo``'s newline; ``printf '%s'`` cannot emit one."""
+        expr = self._extract_ver_id_expression()
+        self.assertNotIn("echo", expr, "use printf '%s' — echo's newline becomes a dash")
+        self.assertIn("printf", expr)
+
+    def test_branch_refs_stay_single_dash_separated(self):
+        """A ref may itself contain characters tr rewrites; the join stays one dash."""
+        ver_id = self._ver_id("main", "main")
+        self.assertEqual(ver_id, "main-main")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

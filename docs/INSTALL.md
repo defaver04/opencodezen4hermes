@@ -143,17 +143,21 @@ followed by an `ls -lh` of that directory, and `dist/` holds exactly two files �
 the tarball and `SHA256SUMS`:
 
 ```
-hermes-webui-agent-v0.52.458-v2026.9.24--linux-arm64.tar.gz
+hermes-webui-agent-v0.52.458-v2026.9.24-linux-arm64.tar.gz
 SHA256SUMS
 ```
 
-Note the **double dash** before `linux-arm64`. The name is built at
-`build.sh:255` as `hermes-webui-agent-${VER_ID}-linux-arm64.tar.gz`, where
-`VER_ID` comes from `tr -c 'a-zA-Z0-9._-' '-'` over the two refs — and `tr` maps
-the trailing newline of `echo` to `-` as well, so `VER_ID` ends in a dash. Use
-the glob `hermes-webui-agent-*-linux-arm64.tar.gz` rather than retyping the
-literal name; that is what the install and upgrade snippets in
-[../README.md](../README.md) do.
+The name is built at `build.sh:257` as
+`hermes-webui-agent-${VER_ID}-linux-arm64.tar.gz`. Upstream computed `VER_ID`
+with `echo … | tr -c 'a-zA-Z0-9._-' '-'`, and because `tr -c` also maps
+`echo`'s trailing newline to `-`, that name carried a double dash
+(`…v2026.9.24--linux-arm64…`). This repo uses `printf` instead, so the name is
+clean. The first release here (`pack-20261019-2141`) still has the double dash
+because it was built before the fix; every later build does not.
+
+Either way, prefer the glob `hermes-webui-agent-*-linux-arm64.tar.gz` over
+retyping the literal name — that is what the install and upgrade snippets in
+[../README.md](../README.md) do, and it survives this kind of change.
 
 The builder refuses to run on any host that is not `aarch64`, printing, in red:
 
