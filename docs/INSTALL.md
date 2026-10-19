@@ -179,10 +179,18 @@ b3ca0513…  dist/hermes-webui-agent-…-linux-arm64.tar.gz
 
 In a download folder there is no `dist/`, so the check fails — quietly, for the
 reason above. Releases built before `build.sh:266` was fixed carry that form;
-this repo now writes a bare filename by `cd`-ing into `OUT_DIR` first. The
-published `pack-local-20261019-2157-namecheck` is a pre-fix artefact: its
-`SHA256SUMS` still has the `dist/` prefix, so either strip the prefix with
-`sed 's|dist/||' SHA256SUMS` or compare the hash by eye.
+this repo now writes a bare filename by `cd`-ing into `OUT_DIR` first, and
+`pack-local-20261019-2230-sumfix` was verified end to end against the published
+asset:
+
+```
+dff84d25cede5d5f081821a42b6ed3390bddc6bb144b395b5a2a60efbf63a5ce  hermes-webui-agent-v0.52.458-v2026.9.24-linux-arm64.tar.gz
+hermes-webui-agent-v0.52.458-v2026.9.24-linux-arm64.tar.gz: OK
+```
+
+The two earlier releases (`pack-20261019-2141`, `pack-local-20261019-2157-namecheck`)
+predate the fix: their `SHA256SUMS` still has the `dist/` prefix, so either strip
+it with `sed 's|dist/||' SHA256SUMS` or compare the hash by eye.
 
 The builder refuses to run on any host that is not `aarch64`, printing, in red:
 
