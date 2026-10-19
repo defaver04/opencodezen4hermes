@@ -117,15 +117,31 @@ launcher passes `--port` explicitly, so in a pack the two must agree.
 
 ## `403 FreeTierError`
 
-**Cause.** The lane's egress-IP quota. It is not a bug in this repository, and
-there is usually nothing to fix locally.
+**Cause.** Two different things produce this exact string, and they need
+different responses. Check them in this order.
 
-This is the failure the project is most often asked about, so the evidence is
-worth stating precisely: from a datacenter IP, a request that is byte-for-byte
-identical to the official CLI's own request returns `403 FreeTierError` for every
-free model, while `GET /v1/models` from the same IP returns `200`. The lane
-answers the catalog and refuses the completions. That is the lane enforcing a
-per-source-IP limit, not the client doing something wrong.
+**1. The request was not streamed.** `stream` absent or `false` yields
+`403 FreeTierError` for every free model, on any IP, from any client. This is
+the single most common cause, including for us: the first round of investigation
+in this repo concluded "the lane is closed from this sandbox" on the strength of
+non-streaming probes, which are *invalid* gate tests rather than merely weak
+ones. A byte-for-byte identical request with `stream: true` added returned `200`
+for all nine models from the same datacenter IP. [GATE.md](GATE.md) records the
+ablation. The sidecar always forces `stream: true`
+(`sidecar/gate.py` `shape_body()`), so a 403 from a request that went *through*
+the sidecar cannot be this — but a 403 reproduced with raw `curl` often is.
+
+**2. The egress IP is genuinely rate-limited.** The anonymous lane is limited per
+source IP — the reason the upstream `opencodezen4dsh` project carries a whole
+proxy-pool subsystem. `GET /v1/models` from a throttled IP still returns `200`
+while `/chat/completions` refuses, because the catalog is not the metered
+resource. Shared egress (office NAT, a busy VPN exit, a datacenter range) makes
+this likely. Symptom on a good IP, for contrast: `nemotron-3.5-lightning-free`
+took 40.5 s when probed after eight other models and 1.1 s on its own — per-IP
+queueing, not a slow model ([E2E_PROOF.md](E2E_PROOF.md)).
+
+If you arrived here from a 403 on a request you built by hand, suspect (1) first.
+If it came through the sidecar, suspect (2).
 
 **Check.** The sidecar converts upstream 401/403 into `502` at its edge so a
 rejected upstream call is not mistaken for a bad local API key, and it appends an
@@ -140,13 +156,21 @@ match your installed CLI version.
 
 **Fix.**
 
-- Wait and retry — quota windows pass.
+- If you can reproduce it with raw `curl`, add `"stream": true` to the body
+  before concluding anything. That alone resolves most reports.
+- Check the `user-agent` really starts with `opencode/` and carries a real
+  version. A missing UA, or a browser UA, returns the same 403 — the lane checks
+  the prefix and a version floor, nothing more ([GATE.md](GATE.md)).
+- Check `x-opencode-session` matches `^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$`. It is
+  shape-checked only, so an expired or invented timestamp is fine, but
+  `ses_zzz` is not. The sidecar mints these itself; a hand-built request usually
+  omits them.
+- Otherwise: wait and retry — quota windows pass.
 - Leave a shared NAT, a VPN, or a datacenter range. A residential egress works
   better, and this is the documented reason.
-- If you are behind a machine that has an OpenCode CLI installed, set
-  `OPENCODEZEN4HERMES_USER_AGENT` to that CLI's exact version string so the wire
-  UA matches what the lane sees from a normal client. The lane only validates the
-  `opencode/<semver>` prefix, so this is rarely the deciding factor.
+- Setting `OPENCODEZEN4HERMES_USER_AGENT` to your installed CLI's exact version
+  is almost never the deciding factor; the lane validates only the prefix and a
+  version floor.
 - Understand the limit before working around it: this project deliberately ships
   no proxy pool and no egress rotation. See
   [../README.md#batasan-yang-jujur](../README.md#batasan-yang-jujur).

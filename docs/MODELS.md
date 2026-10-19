@@ -106,8 +106,11 @@ reason, recorded in `sidecar/catalog.py`:
 | `ling-3.0-flash-fin-free` | `400 "Model is unavailable"` — succeeded by the 3.1 line. |
 
 The source carries the rule for removing an entry: *"Remove an entry only after a
-live streaming probe answers 200 or 429."* A 403 does not count, because a 403 is
-the per-egress-IP quota talking, not the model.
+live streaming probe answers 200 or 429."* A 403 does not count, because it says
+nothing about the model — it is either the per-egress-IP quota or, more often, a
+probe that forgot `stream: true` ([GATE.md](GATE.md)). Only a 400 whose
+`error.type` names a protocol or availability problem is evidence against a
+model, which is exactly what the three entries above carry.
 
 `include_paid` (`OPENCODEZEN4HERMES_INCLUDE_PAID=1`, or `--include-paid`) widens
 the exposed roster past the free verdict for debugging. It is off by default and
