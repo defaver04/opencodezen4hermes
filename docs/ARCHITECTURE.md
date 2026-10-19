@@ -3,8 +3,13 @@
 How a model selection in the Hermes WebUI becomes a completion from the OpenCode
 Zen free lane, and why every piece in between has to exist.
 
-Every line reference below was checked against the file it names. Paths in
-`/tmp/hwa/vendor/upstream/` are the upstream seams; the rest are this repository.
+Every line reference below was checked against the file it names. Paths under
+`vendor/upstream/` are seams in the upstream projects, not files in this
+repository — they exist in a build checkout, which is what `build.sh` produces in
+`.work/`. To follow a reference by hand, unpack the pinned tarballs named in
+`sources.lock.json` (or clone `nesquena/hermes-webui` at `v0.52.458` and
+`NousResearch/hermes-agent` at `v2026.9.24`) into `vendor/upstream/`. Every other
+path below is this repository.
 
 ---
 
@@ -48,7 +53,7 @@ rejected.
 
 ### 1. The picker builds its list
 
-`/tmp/hwa/vendor/upstream/hermes-webui/api/config.py:9397` —
+`vendor/upstream/hermes-webui/api/config.py:9397` —
 
 ```python
 def get_available_models(*, prefer_cache: bool = False, force_refresh: bool = False) -> dict:
@@ -56,13 +61,13 @@ def get_available_models(*, prefer_cache: bool = False, force_refresh: bool = Fa
 
 This is what the model menu reads. For each provider it decides admission:
 
-- `/tmp/hwa/vendor/upstream/hermes-webui/api/config.py:9930` — `_has_provider_route = any(...)`
+- `vendor/upstream/hermes-webui/api/config.py:9930` — `_has_provider_route = any(...)`
   over the keys `("api", "base_url", "api_key", "key_env")`.
-- `/tmp/hwa/vendor/upstream/hermes-webui/api/config.py:9971` —
+- `vendor/upstream/hermes-webui/api/config.py:9971` —
   `_admit_as_known = _is_known_provider and _already_credentialed`.
-- `/tmp/hwa/vendor/upstream/hermes-webui/api/config.py:9972` —
+- `vendor/upstream/hermes-webui/api/config.py:9972` —
   `if not (_admit_as_known or _has_provider_route or _has_models_only_active_route): continue`
-- `/tmp/hwa/vendor/upstream/hermes-webui/api/config.py:9976` —
+- `vendor/upstream/hermes-webui/api/config.py:9976` —
   `detected_providers.add(_canonical)`
 
 `opencode-zen-free` is not a known provider, so `_admit_as_known` is false. It
@@ -72,20 +77,20 @@ and the seed is what puts `base_url` there. **Remove the seed and the loop
 that shapes the whole project.
 
 The model list itself comes from
-`/tmp/hwa/vendor/upstream/hermes-webui/api/config.py:9255` —
+`vendor/upstream/hermes-webui/api/config.py:9255` —
 `def _read_live_provider_model_ids(provider_id: str) -> list[str]`, which imports
 `hermes_cli.models.provider_model_ids`.
 
 ### 2. the provider's model ids
 
-`/tmp/hwa/vendor/upstream/hermes-agent/hermes_cli/models.py:1603` —
+`vendor/upstream/hermes-agent/hermes_cli/models.py:1603` —
 
 ```python
 def provider_model_ids(provider: Optional[str], *, force_refresh: bool = False) -> list[str]:
 ```
 
 For a plugin profile it reaches
-`/tmp/hwa/vendor/upstream/hermes-agent/hermes_cli/models.py:1532` —
+`vendor/upstream/hermes-agent/hermes_cli/models.py:1532` —
 `def _profile_live_catalog(normalized: str) -> Optional[list[str]]`, which for a
 non-`api_key` profile returns `list(profile.fallback_models)` — the nine ids
 hardcoded in `plugin/opencode-zen-free/__init__.py:34` as `FALLBACK_FREE_MODELS`.
@@ -101,23 +106,23 @@ the picker renders.
 
 ### 3. Credentialing the plugin provider
 
-`/tmp/hwa/vendor/upstream/hermes-webui/api/providers.py:2585` —
+`vendor/upstream/hermes-webui/api/providers.py:2585` —
 
 ```python
 if not has_key and is_plugin_model_provider(pid):
 ```
 
 A plugin provider without a key is not treated as unconfigured. The status comes
-back as `/tmp/hwa/vendor/upstream/hermes-webui/api/providers.py:2616`
+back as `vendor/upstream/hermes-webui/api/providers.py:2616`
 `key_source = "config_yaml"` — the `api_key: public` sentinel from the seed.
 
 `is_plugin_model_provider` is
-`/tmp/hwa/vendor/upstream/hermes-webui/api/plugin_providers.py:136`; it works off
-`/tmp/hwa/vendor/upstream/hermes-webui/api/plugin_providers.py:83` —
+`vendor/upstream/hermes-webui/api/plugin_providers.py:136`; it works off
+`vendor/upstream/hermes-webui/api/plugin_providers.py:83` —
 `def plugin_model_provider_ids() -> frozenset[str]`.
 
 Auth status flows through
-`/tmp/hwa/vendor/upstream/hermes-agent/hermes_cli/auth.py:2027` —
+`vendor/upstream/hermes-agent/hermes_cli/auth.py:2027` —
 `def get_auth_status(provider_id: Optional[str] = None) -> Dict[str, Any]`, whose
 `_STATUS_BY_AUTH_TYPE` table maps `"api_key"` to `get_api_key_provider_status`
 (`hermes_cli/auth.py:2052`). The profile's `auth_type` is `"api_key"` with

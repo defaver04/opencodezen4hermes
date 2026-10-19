@@ -229,7 +229,7 @@ in step:
 
 ```bash
 python3 -m sidecar --port 8801
-/tmp/venv/bin/python install/seed_config.py --port 8801
+.venv/bin/python install/seed_config.py --port 8801
 ```
 
 The two must agree — the seed writes the port into `base_url`, and the sidecar
