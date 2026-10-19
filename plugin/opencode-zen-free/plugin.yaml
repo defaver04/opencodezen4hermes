@@ -1,0 +1,6 @@
+name: opencode-zen-free
+kind: model-provider
+version: 0.1.0
+description: >-
+  Free OpenCode Zen models over the anonymous lane, carried by the local
+  opencodezen4hermes sidecar. No API key required.

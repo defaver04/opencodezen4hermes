@@ -1,0 +1,153 @@
+name: release-checkout
+
+# Build pack arm64 dari source di repo ini + lapisan opencodezen4hermes.
+#
+# ---------------------------------------------------------------------------
+# KEPUTUSAN MODE SUMBER: SOURCE=tarball (bukan SOURCE=vendor)
+# ---------------------------------------------------------------------------
+# Upstream memakai SOURCE=vendor di sini, karena di sana source kedua upstream
+# DI-COMMIT di vendor/upstream/ supaya bisa di-patch langsung di repo. Repo ini
+# TIDAK memuat vendor/ sama sekali — 282 MB, dan docs/BLUEPRINT.md §9 menetapkan
+# "No vendored upstream source. sources.lock.json pins the two upstream
+# tarballs". Jadi SOURCE=vendor di repo ini pasti gagal di build.sh:52-53
+# ("vendor/upstream/hermes-webui tidak ada"), dan itu bukan bug yang boleh
+# ditambal dengan meng-kloning diam-diam ke vendor/.
+#
+# Alternatif (a) — kloning kedua upstream di ref yang di-pin ke vendor/upstream
+# lalu build SOURCE=vendor — DITOLAK, dengan alasan teknis:
+#   1. Hasilnya identik dengan SOURCE=tarball, tapi VERIFIKASI sha256 HILANG:
+#      di mode vendor seluruh blok unduh+cek hash (build.sh:59-95) dilewati,
+#      sehingga jaminan supply-chain yang justru jadi alasan sources.lock.json
+#      ada ikut hilang. Lebih lambat, lebih banyak disk, lebih lemah jaminannya.
+#   2. Ia menyamar sebagai "build dari source yang di-commit di repo", padahal
+#      source-nya tetap datang dari jaringan. Nama workflow-nya jadi bohong.
+#   3. Ia menduplikasi release.yml tanpa menambah kemampuan apa pun.
+#
+# Yang MEMANG berbeda di repo ini adalah lapisan milik repo ini sendiri
+# (sidecar/, plugin/, install/). Lapisan itu SELALU dibangun dari checkout ini
+# di kedua workflow — itu inti repo ini. Dengan SOURCE=tarball, workflow ini
+# tetap jujur: upstream dari tarball ter-pin + hash terverifikasi, lapisan
+# opencodezen4hermes dari source di repo ini.
+#
+# Guna praktis workflow ini dibanding release.yml: kanal rilis non-kanonik.
+# Ia punya input `suffix`, menandai rilis sebagai pack-local-*, dan bisa
+# dipakai untuk memaketkan perubahan pada lapisan repo ini (sidecar/plugin/
+# install) tanpa menyentuh pin di sources.lock.json.
+#
+# CATATAN: SOURCE=vendor tetap DIHORMATI bila seseorang sengaja menaruh
+# vendor/upstream/ di checkout ini (mis. runner swasta) — langkah "Pilih mode
+# sumber" di bawah mendeteksinya. Sadari risikonya: di mode itu label versi
+# tarball tetap diambil dari sources.lock.json, jadi vendor/ yang basi akan
+# menghasilkan pack berlabel menyesatkan; karena itu deteksi tersebut
+# memunculkan warning.
+
+on:
+  workflow_dispatch:
+    inputs:
+      suffix:
+        description: 'Akhiran nama release (opsional, mis. mobile-test)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    # WAJIB arm64: build.sh hard-assert `uname -m` == aarch64 (build.sh:38-39).
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prasyarat sistem (curl/tar/python3 sudah ada di runner)
+        run: |
+          set -euxo pipefail
+          sudo apt-get update -y >/dev/null || true
+          sudo apt-get install -y --no-install-recommends xz-utils file >/dev/null
+          python3 --version
+          tar --version | head -1
+
+      # Gerbang tes sebelum build (docs/BLUEPRINT.md §8: stdlib unittest murni).
+      # Suite kosong membuat discover keluar kode 5 dan build memang harus gagal.
+      - name: Unit test — gerbang sebelum build
+        run: python3 -m unittest discover -s tests -v
+
+      - name: Pilih mode sumber
+        id: src
+        run: |
+          set -euo pipefail
+          if [ -d vendor/upstream/hermes-webui ] && [ -d vendor/upstream/hermes-agent ]; then
+            echo "::warning::vendor/upstream/ ada di checkout — memakai SOURCE=vendor. Label versi tarball tetap dari sources.lock.json dan sha256 TIDAK diverifikasi di mode ini; pastikan vendor/ tidak basi."
+            echo "mode=vendor" >> "$GITHUB_OUTPUT"
+          else
+            echo "vendor/upstream/ tidak ada (sesuai docs/BLUEPRINT.md §9) — SOURCE=tarball, sha256 diverifikasi."
+            echo "mode=tarball" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build pack
+        run: bash build.sh
+        env:
+          OUT_DIR: dist
+          SOURCE: ${{ steps.src.outputs.mode }}
+
+      - name: Sanity pack (tar integrity + file types)
+        run: |
+          set -euxo pipefail
+          ls -lh dist
+          TARBALL=$(ls dist/*.tar.gz | head -1)
+          tar -tzf "$TARBALL" > /tmp/pack-listing.txt
+          echo "total entri: $(wc -l < /tmp/pack-listing.txt)"
+          for top in hermes-webui hermes-agent .venv .pyroot bin sidecar install; do
+            echo "$top: $(grep -c "^\./$top/" /tmp/pack-listing.txt || true) entri"
+          done
+          # --- blok upstream: assertion lama, tidak boleh dilonggarkan ---
+          grep -q "^\./hermes-agent/run_agent\.py$" /tmp/pack-listing.txt || (echo "run_agent.py hilang"; exit 1)
+          grep -q "^\./hermes-webui/server\.py$" /tmp/pack-listing.txt || (echo "server.py hilang"; exit 1)
+          grep -q "^\./\.venv/bin/python$" /tmp/pack-listing.txt || (echo "venv python hilang"; exit 1)
+          grep -q "^\./hermes-agent/hermes_cli/tui_dist/entry\.js$" /tmp/pack-listing.txt || (echo "tui entry.js hilang"; exit 1)
+          grep -q "^\./hermes-agent/hermes_cli/web_dist/index\.html$" /tmp/pack-listing.txt || (echo "web index.html hilang"; exit 1)
+          # --- blok opencodezen4hermes: hasil tahap 8 (docs/BLUEPRINT.md §4) ---
+          grep -q "^\./sidecar/server\.py$" /tmp/pack-listing.txt || (echo "sidecar/server.py hilang"; exit 1)
+          grep -q "^\./sidecar/gate/official_tools\.json$" /tmp/pack-listing.txt || (echo "sidecar/gate/official_tools.json hilang"; exit 1)
+          grep -q "^\./hermes-agent/plugins/model-providers/opencode-zen-free/__init__\.py$" /tmp/pack-listing.txt || (echo "plugin opencode-zen-free hilang"; exit 1)
+          grep -q "^\./install/seed_config\.py$" /tmp/pack-listing.txt || (echo "install/seed_config.py hilang"; exit 1)
+          grep -q "^\./bin/opencodezen4hermes-sidecar$" /tmp/pack-listing.txt || (echo "bin/opencodezen4hermes-sidecar hilang"; exit 1)
+          grep -q "^\./bin/hermes-webui\.upstream$" /tmp/pack-listing.txt || (echo "launcher upstream tidak di-backup"; exit 1)
+          # Launcher harus versi yang sudah di-extend — cek ISI file (BLUEPRINT §6).
+          tar -xzOf "$TARBALL" ./bin/hermes-webui | grep -q "OPENCODEZEN4HERMES" \
+            || (echo "bin/hermes-webui belum di-extend (tidak menyebut sidecar)"; exit 1)
+          echo "Sanity pack OK"
+
+      - name: Dump hermes-agent root files (debug)
+        if: always()
+        run: |
+          if [ -f /tmp/pack-listing.txt ]; then
+            echo "== anak root ./hermes-agent (30) =="
+            grep "^\./hermes-agent/[^/]*$" /tmp/pack-listing.txt | head -30
+            echo "== anak root ./ (10) =="
+            grep "^\./[^/]*$" /tmp/pack-listing.txt | head -10
+            echo "== lapisan opencodezen4hermes =="
+            grep -E "^\./(sidecar|install)/" /tmp/pack-listing.txt | head -20
+          fi
+
+      - name: Upload pack sebagai artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: opencodezen4hermes-pack-checkout
+          path: |
+            dist/*.tar.gz
+            dist/SHA256SUMS
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload ke Release (bypass arti quota)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          SUFFIX="${{ inputs.suffix }}"
+          TAG="pack-local-$(date +%Y%m%d-%H%M)${SUFFIX:+-$SUFFIX}"
+          gh release create "$TAG" --title "Pack checkout-local $TAG" --notes "Build dari source repo ini (commit $GITHUB_SHA, SOURCE=${{ steps.src.outputs.mode }})" --repo "$GITHUB_REPOSITORY"
+          gh release upload "$TAG" dist/*.tar.gz dist/SHA256SUMS --repo "$GITHUB_REPOSITORY"

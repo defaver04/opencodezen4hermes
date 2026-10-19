@@ -1,0 +1,76 @@
+# Packaging metadata only (PEP 621).
+#
+# opencodezen4hermes is never `pip install`-ed at runtime: it ships *inside* the
+# hermes-webui-agent arm64 pack as a plain directory (`<pack>/sidecar/`), run by
+# the pack's own interpreter. See docs/BLUEPRINT.md §4 and §5. This file exists
+# so the repository is a well-formed project that tooling can introspect, and so
+# the distribution name, version, licence and URLs have one declared source.
+#
+# `requires-python` matches docs/BLUEPRINT.md §8: tests are standard-library
+# unittest on a bare python3.12, with no third-party imports at test time.
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "opencodezen4hermes"
+dynamic = ["version"]
+description = "Bundle the free OpenCode Zen model roster into a hermes-webui-agent arm64 pack"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "defaver04" }]
+keywords = [
+    "hermes",
+    "hermes-webui",
+    "opencode",
+    "opencode-zen",
+    "llm",
+    "openai-compatible",
+    "sidecar",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Internet :: Proxy Servers",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
+]
+# No runtime dependencies, deliberately: the sidecar uses urllib from the
+# standard library so the pack needs nothing beyond its own interpreter.
+dependencies = []
+
+[project.optional-dependencies]
+# Empty on purpose — the test suite is stdlib unittest (BLUEPRINT §8).
+dev = []
+
+[project.urls]
+Homepage = "https://github.com/defaver04/opencodezen4hermes"
+Repository = "https://github.com/defaver04/opencodezen4hermes"
+Issues = "https://github.com/defaver04/opencodezen4hermes/issues"
+Changelog = "https://github.com/defaver04/opencodezen4hermes/releases"
+Documentation = "https://github.com/defaver04/opencodezen4hermes/blob/main/docs/BLUEPRINT.md"
+
+[project.scripts]
+# Matches BLUEPRINT §5: `python3 -m sidecar` and this console script are the two
+# supported development entry points. The installed pack uses
+# `<pack>/bin/opencodezen4hermes-sidecar` instead (BLUEPRINT §4).
+opencodezen4hermes-sidecar = "sidecar.server:main"
+
+[tool.setuptools]
+packages = ["sidecar"]
+
+[tool.setuptools.dynamic]
+version = { attr = "sidecar.__version__" }
+
+[tool.setuptools.package-data]
+# The gate fixture is data, not code: without it gate.py cannot build a request.
+sidecar = ["gate/*.json", "gate/*.txt"]

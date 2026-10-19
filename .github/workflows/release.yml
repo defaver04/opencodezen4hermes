@@ -1,0 +1,144 @@
+name: release
+
+# Build pack arm64 MURNI dari upstream (SOURCE=tarball) + lapisan opencodezen4hermes.
+#
+# Urutan langkah sengaja: unit test -> build -> sanity pack -> artefak/release.
+# Tes jalan LEBIH DULU supaya pack tidak pernah dibangun dari kode merah.
+#
+# Runner WAJIB arm64 (ubuntu-24.04-arm): build.sh meng-hard-assert
+# `uname -m` == aarch64 di tahap 1 (build.sh:38-39) dan akan langsung mati di
+# runner x86. Jangan diganti ke ubuntu-latest.
+
+on:
+  workflow_dispatch:
+    inputs:
+      webui_ref:
+        description: 'hermes-webui ref (tag/branch)'
+        required: false
+        default: ''
+      agent_ref:
+        description: 'hermes-agent ref (tag/branch)'
+        required: false
+        default: ''
+  schedule:
+    - cron: '17 3 * * 1'   # Senin 03:17 UTC: sanity build mingguan repo ini
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prasyarat sistem (curl/tar/python3 sudah ada di runner)
+        run: |
+          set -euxo pipefail
+          sudo apt-get update -y >/dev/null || true
+          sudo apt-get install -y --no-install-recommends xz-utils file >/dev/null
+          python3 --version
+          tar --version | head -1
+
+      # Gerbang tes. Kontrak: stdlib unittest murni, tanpa dependensi pihak ketiga
+      # (docs/BLUEPRINT.md §8), jadi langkah ini jalan di python3 runner apa adanya.
+      # Isi tests/ dimiliki task-4/task-7/task-8; kalau suite masih kosong,
+      # `unittest discover` keluar dengan kode 5 (NO TESTS RAN) dan build memang
+      # harus gagal — itu disengaja, bukan bug workflow.
+      - name: Unit test — gerbang sebelum build
+        run: python3 -m unittest discover -s tests -v
+
+      # Ref override lewat input workflow (tanpa mengubah sources.lock.json).
+      #
+      # PENTING — kenapa sha256 diisi STRING "null", bukan null JSON:
+      # sha256 di sources.lock.json adalah hash tarball untuk tag yang di-pin.
+      # Begitu ref di-override, hash itu tidak lagi menggambarkan apa yang
+      # diunduh, jadi verifikasinya harus dilewati. build.sh:64-78 hanya
+      # memverifikasi saat `lock .webui.sha256` bukan "auto-on-first-build" dan
+      # bukan "null" (perbandingan string). lib.sh:10-31 mencetak nilai JSON apa
+      # adanya lewat python, dan python mencetak null JSON sebagai "None" —
+      # sehingga null JSON TIDAK lolos pengecekan itu dan build malah mencoba
+      # `sha256sum --check` pada baris sampah lalu mati. Sudah diuji di shell:
+      # sha256="null" → dilewati (benar); sha256=None → dicoba (salah).
+      # Jadi tulis string "null" literal.
+      - name: Tulis ref override (opsional)
+        run: |
+          set -euo pipefail
+          if [ -n "${{ inputs.webui_ref }}" ]; then
+            python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["webui"]["ref"]=sys.argv[2]; d["webui"]["mode"]="tag" if sys.argv[2] not in ("main","master") else "branch"; d["webui"]["sha256"]="null"; json.dump(d,open(sys.argv[1],"w"),indent=2)' "$SOURCES" "${{ inputs.webui_ref }}"
+            echo "::warning::webui ref di-override ke ${{ inputs.webui_ref }} — sha256 webui dikosongkan (tidak diverifikasi)"
+          fi
+          if [ -n "${{ inputs.agent_ref }}" ]; then
+            python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["agent"]["ref"]=sys.argv[2]; d["agent"]["mode"]="tag" if sys.argv[2] not in ("main","master") else "branch"; d["agent"]["sha256"]="null"; json.dump(d,open(sys.argv[1],"w"),indent=2)' "$SOURCES" "${{ inputs.agent_ref }}"
+            echo "::warning::agent ref di-override ke ${{ inputs.agent_ref }} — sha256 agent dikosongkan (tidak diverifikasi)"
+          fi
+        env:
+          SOURCES: sources.lock.json
+
+      - name: Build pack
+        run: bash build.sh
+        env:
+          OUT_DIR: dist
+
+      - name: Sanity pack (tar integrity + file types)
+        run: |
+          set -euxo pipefail
+          ls -lh dist
+          TARBALL=$(ls dist/*.tar.gz | head -1)
+          # Listing penuh ke file sekali saja (SIGPIPE-safe, murah), lalu grep file.
+          tar -tzf "$TARBALL" > /tmp/pack-listing.txt
+          echo "total entri: $(wc -l < /tmp/pack-listing.txt)"
+          for top in hermes-webui hermes-agent .venv .pyroot bin sidecar install; do
+            echo "$top: $(grep -c "^\./$top/" /tmp/pack-listing.txt || true) entri"
+          done
+          # --- blok upstream: assertion lama, tidak boleh dilonggarkan ---
+          grep -q "^\./hermes-agent/run_agent\.py$" /tmp/pack-listing.txt || (echo "run_agent.py hilang"; exit 1)
+          grep -q "^\./hermes-webui/server\.py$" /tmp/pack-listing.txt || (echo "server.py hilang"; exit 1)
+          grep -q "^\./\.venv/bin/python$" /tmp/pack-listing.txt || (echo "venv python hilang"; exit 1)
+          grep -q "^\./hermes-agent/hermes_cli/tui_dist/entry\.js$" /tmp/pack-listing.txt || (echo "tui entry.js hilang"; exit 1)
+          grep -q "^\./hermes-agent/hermes_cli/web_dist/index\.html$" /tmp/pack-listing.txt || (echo "web index.html hilang"; exit 1)
+          # --- blok opencodezen4hermes: hasil tahap 8 (docs/BLUEPRINT.md §4) ---
+          grep -q "^\./sidecar/server\.py$" /tmp/pack-listing.txt || (echo "sidecar/server.py hilang"; exit 1)
+          grep -q "^\./sidecar/gate/official_tools\.json$" /tmp/pack-listing.txt || (echo "sidecar/gate/official_tools.json hilang"; exit 1)
+          grep -q "^\./hermes-agent/plugins/model-providers/opencode-zen-free/__init__\.py$" /tmp/pack-listing.txt || (echo "plugin opencode-zen-free hilang"; exit 1)
+          grep -q "^\./install/seed_config\.py$" /tmp/pack-listing.txt || (echo "install/seed_config.py hilang"; exit 1)
+          grep -q "^\./bin/opencodezen4hermes-sidecar$" /tmp/pack-listing.txt || (echo "bin/opencodezen4hermes-sidecar hilang"; exit 1)
+          grep -q "^\./bin/hermes-webui\.upstream$" /tmp/pack-listing.txt || (echo "launcher upstream tidak di-backup"; exit 1)
+          # Launcher harus versi yang sudah di-extend, bukan upstream asli:
+          # cek ISI file, bukan cuma keberadaannya (BLUEPRINT §6).
+          tar -xzOf "$TARBALL" ./bin/hermes-webui | grep -q "OPENCODEZEN4HERMES" \
+            || (echo "bin/hermes-webui belum di-extend (tidak menyebut sidecar)"; exit 1)
+          echo "Sanity pack OK"
+
+      - name: Dump hermes-agent root files (debug)
+        if: always()
+        run: |
+          if [ -f /tmp/pack-listing.txt ]; then
+            echo "== anak root ./hermes-agent (30) =="
+            grep "^\./hermes-agent/[^/]*$" /tmp/pack-listing.txt | head -30
+            echo "== anak root ./ (10) =="
+            grep "^\./[^/]*$" /tmp/pack-listing.txt | head -10
+            echo "== lapisan opencodezen4hermes =="
+            grep -E "^\./(sidecar|install)/" /tmp/pack-listing.txt | head -20
+          fi
+
+      - name: Upload pack sebagai artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: opencodezen4hermes-pack
+          path: |
+            dist/*.tar.gz
+            dist/SHA256SUMS
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload ke Release (bypass arti quota)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="pack-$(date +%Y%m%d-%H%M)"
+          gh release create "$TAG" --title "Pack $TAG" --notes "Auto pack" --repo "$GITHUB_REPOSITORY"
+          gh release upload "$TAG" dist/*.tar.gz dist/SHA256SUMS --repo "$GITHUB_REPOSITORY"

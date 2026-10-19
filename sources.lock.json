@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "#doc": [
+    "Pin kedua upstream yang dipaketkan builder ini.",
+    "Untuk update: naikkan 'ref' di sini, hitung ulang sha256, commit. Selesai.",
+    "Jika mode=branch, ref boleh bergerak; sha256 dikosongkan (null) dan tidak diverifikasi",
+    "(kurang aman, praktis untuk mengikuti main)."
+  ],
+  "webui": {
+    "repo": "nesquena/hermes-webui",
+    "ref": "v0.52.458",
+    "mode": "tag",
+    "sha256": "e870570c1096fa79f0a35a40bc7d8ce1644b05dac9c1d9fd83e2c5f611fb3659",
+    "tarball": "https://github.com/nesquena/hermes-webui/archive/{ref}.tar.gz"
+  },
+  "agent": {
+    "repo": "NousResearch/hermes-agent",
+    "ref": "v2026.9.24",
+    "mode": "tag",
+    "sha256": "15b15ce4e6ec8ea424a081823709d1e17f0943e7b42b59597d24ebb94cbd1742",
+    "tarball": "https://github.com/NousResearch/hermes-agent/archive/{ref}.tar.gz"
+  },
+  "#agent-note": "Agent juga punya branch 'main' (mode=branch, ref=main) \u2014 kurang reproducible namun cocok untuk mengikuti rilis cepat.",
+  "node": {
+    "version": "26.7.0",
+    "linux-arm64": "https://nodejs.org/dist/v26.7.0/node-v26.7.0-linux-arm64.tar.xz"
+  },
+  "uv": {
+    "version": "0.12.3",
+    "linux-arm64": "https://github.com/astral-sh/uv/releases/download/0.12.3/uv-aarch64-unknown-linux-gnu.tar.gz"
+  }
+}

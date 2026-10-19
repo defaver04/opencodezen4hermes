@@ -1,0 +1,113 @@
+# Continuous integration for opencodezen4hermes.
+#
+# Pure-python checks only: the sidecar has no runtime dependencies and the test
+# suite is standard-library unittest (docs/BLUEPRINT.md §8), so this runs on
+# ubuntu-latest x86 runners even though the ship target is arm64. Nothing here
+# needs the network — the pack build lives in release.yml / release-checkout.yml.
+name: ci
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: tests (python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Byte-compile every tree (syntax gate)
+        run: python3 -m compileall -q sidecar install scripts tests plugin
+
+      - name: Unit tests (stdlib unittest, no network)
+        run: python3 -m unittest discover -s tests -v
+
+      - name: Free-roster parity
+        # Asserts the nine BLUEPRINT §3 ids are the ones the plugin advertises,
+        # and that sidecar/catalog.py agrees. Parsed with ast rather than
+        # imported: importing the plugin would need the hermes-agent `providers`
+        # package, which this repository deliberately does not vendor.
+        run: |
+          python3 - <<'PY'
+          import ast, pathlib, sys
+
+          BLUEPRINT_ROSTER = [                       # docs/BLUEPRINT.md §3, in order
+              "beam-free",
+              "big-pickle",
+              "deepseek-v4.1-flash-free",
+              "glm-5.3-flash-free",
+              "longcat-2.5-preview-free",
+              "mimo-v2.6-flash-free",
+              "minimax-m3.1-flash-free",
+              "nemotron-3.5-lightning-free",
+              "nemotron-3.5-super-vl-free",
+          ]
+
+          def literal_assignment(path, name):
+              tree = ast.parse(pathlib.Path(path).read_text(encoding="utf-8"))
+              for node in ast.walk(tree):
+                  targets = []
+                  value = None
+                  if isinstance(node, ast.Assign):
+                      targets, value = node.targets, node.value
+                  elif isinstance(node, ast.AnnAssign) and node.value is not None:
+                      targets, value = [node.target], node.value
+                  names = [t.id for t in targets if isinstance(t, ast.Name)]
+                  if name in names:
+                      return ast.literal_eval(value)
+              raise SystemExit(f"{path}: no literal assignment to {name}")
+
+          plugin = literal_assignment("plugin/opencode-zen-free/__init__.py", "FALLBACK_FREE_MODELS")
+          catalog = literal_assignment("sidecar/catalog.py", "STATIC_FREE_MODELS")
+
+          problems = []
+          if list(plugin) != BLUEPRINT_ROSTER:
+              problems.append(f"plugin FALLBACK_FREE_MODELS {list(plugin)} != BLUEPRINT {BLUEPRINT_ROSTER}")
+          if sorted(catalog) != sorted(BLUEPRINT_ROSTER):
+              problems.append(f"sidecar STATIC_FREE_MODELS {sorted(catalog)} != BLUEPRINT set")
+          if problems:
+              print("\n".join(problems))
+              sys.exit(1)
+          print(f"roster parity OK: {len(BLUEPRINT_ROSTER)} models in plugin and catalog")
+          PY
+
+  hygiene:
+    name: no stray artefacts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Assert no committed bytecode or caches
+        run: |
+          if git ls-files | grep -E '(__pycache__/|\.pyc$|^state/|^dist/|^\.work/)'; then
+            echo "::error::build/runtime artefacts are committed (see .gitignore)"
+            exit 1
+          fi
+          echo "working tree is clean of committed artefacts"
+
+      - name: Assert the gate fixture is present
+        # sidecar/gate.py reads this file at call time; without it every shaped
+        # request fails. Cheap, and it has gone missing before.
+        run: test -s sidecar/gate/official_tools.json && echo "gate fixture present"
