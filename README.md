@@ -4,12 +4,16 @@ Paket **overlay** untuk [defaver04/hermes-webui-agent](https://github.com/defave
 
 ## Mulai cepat (pack yang sudah jadi)
 
+Paket arm64-nya diunduh dari halaman [Releases](https://github.com/defaver04/opencodezen4hermes/releases) (sekitar 210 MB).
+
 ```bash
 mkdir -p ~/hermes-pack
 tar -xzf hermes-webui-agent-*-linux-arm64.tar.gz -C ~/hermes-pack
 cd ~/hermes-pack
 ./bin/hermes-webui          # WebUI di http://localhost:8789
 ```
+
+Kalau mau memeriksa unduhannya, taruh tarball dan `SHA256SUMS` di satu folder lalu jalankan `sha256sum -c --strict SHA256SUMS`. Flag `--strict` bukan hiasan: tanpa itu `sha256sum` tetap keluar dengan kode 0 meski file yang dicatat tidak ada, jadi `SHA256SUMS` yang rusak lolos tanpa suara. Rilis yang dibangun sebelum `build.sh:266` diperbaiki masih mencatat prefiks `dist/` di dalam file itu — lihat [docs/INSTALL.md](docs/INSTALL.md) untuk cara membereskannya.
 
 Launcher `bin/hermes-webui` menjalankan tiga langkah sebelum `exec` ke WebUI, semuanya best-effort dan tercatat di `$STATE/launcher.log`:
 

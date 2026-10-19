@@ -159,6 +159,31 @@ Either way, prefer the glob `hermes-webui-agent-*-linux-arm64.tar.gz` over
 retyping the literal name — that is what the install and upgrade snippets in
 [../README.md](../README.md) do, and it survives this kind of change.
 
+To verify the download, put both files in one folder and run:
+
+```
+sha256sum -c --strict SHA256SUMS
+```
+
+`--strict` matters: without it `sha256sum` prints a warning and still exits 0
+when a listed file is missing, so a broken `SHA256SUMS` would pass unnoticed.
+Use `--strict` and require the `OK` line.
+
+That advice exists because the file was broken. Upstream `build.sh:220` ran
+`sha256sum "$OUT_DIR/$TARBALL_NAME" > "$OUT_DIR/SHA256SUMS"`, which records the
+builder's own path:
+
+```
+b3ca0513…  dist/hermes-webui-agent-…-linux-arm64.tar.gz
+```
+
+In a download folder there is no `dist/`, so the check fails — quietly, for the
+reason above. Releases built before `build.sh:266` was fixed carry that form;
+this repo now writes a bare filename by `cd`-ing into `OUT_DIR` first. The
+published `pack-local-20261019-2157-namecheck` is a pre-fix artefact: its
+`SHA256SUMS` still has the `dist/` prefix, so either strip the prefix with
+`sed 's|dist/||' SHA256SUMS` or compare the hash by eye.
+
 The builder refuses to run on any host that is not `aarch64`, printing, in red:
 
 ```

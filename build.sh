@@ -258,6 +258,11 @@ VER_ID="$(printf '%s' "${WEBUI_REF}-${AGENT_REF}" | tr -c 'a-zA-Z0-9._-' '-')"
 TARBALL_NAME="hermes-webui-agent-${VER_ID}-linux-arm64.tar.gz"
 # --exclude node_modules sebagai lapis kedua (rm -rf di atas + guard).
 tar -czf "$OUT_DIR/$TARBALL_NAME" --exclude='node_modules' -C "$STAGE" .
-sha256sum "$OUT_DIR/$TARBALL_NAME" > "$OUT_DIR/SHA256SUMS"
+# Checksum dicatat dengan path RELATIF, bukan absolut.
+# `sha256sum "$OUT_DIR/$TARBALL_NAME"` menulis "dist/…tar.gz" ke dalam file,
+# sehingga `sha256sum -c SHA256SUMS` gagal di folder unduhan pengguna
+# ("No such file or directory"). Bug ini diwarisi dari upstream build.sh:220.
+# cd dulu supaya yang tercatat hanya nama file-nya.
+( cd "$OUT_DIR" && sha256sum "$TARBALL_NAME" > SHA256SUMS )
 log "Selesai! Artefak di \$OUT_DIR:"
 ls -lh "$OUT_DIR"

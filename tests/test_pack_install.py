@@ -22,6 +22,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import pathlib
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -716,6 +717,88 @@ class TestTarballName(unittest.TestCase):
         """A ref may itself contain characters tr rewrites; the join stays one dash."""
         ver_id = self._ver_id("main", "main")
         self.assertEqual(ver_id, "main-main")
+
+
+class TestChecksumFile(unittest.TestCase):
+    """``SHA256SUMS`` is only useful if ``sha256sum -c`` works in the user's folder.
+
+    Upstream wrote it as ``sha256sum "$OUT_DIR/$TARBALL_NAME" > SHA256SUMS``, so
+    the file recorded the builder's own path::
+
+        b3ca0513…  dist/hermes-webui-agent-…-linux-arm64.tar.gz
+
+    A user who downloads both files and runs the obvious command gets
+    ``dist/…: No such file or directory`` and a FAILED line. Note that
+    ``sha256sum -c`` still exits 0 with that warning for a missing file unless
+    ``--strict`` is used, so the failure is quiet — which is how it survived.
+    The fix is to record a bare filename.
+    """
+
+    @staticmethod
+    def _extract_checksum_command() -> str:
+        for raw in (REPO_ROOT / "build.sh").read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if "SHA256SUMS" in line and not line.startswith("#"):
+                return line
+        raise AssertionError("build.sh has no SHA256SUMS command to test")
+
+    def test_the_checksum_line_records_a_relative_name(self):
+        """The command must not echo the builder's directory into the file."""
+        cmd = self._extract_checksum_command()
+        self.assertNotIn(
+            '"$OUT_DIR/$TARBALL_NAME"',
+            cmd,
+            "recording $OUT_DIR in SHA256SUMS breaks sha256sum -c for the user",
+        )
+
+    def test_the_checksum_verifies_from_a_download_folder(self):
+        """Run the real command, then verify as a user would — in another cwd.
+
+        ``bash -n`` would not catch this: the line is valid shell either way. The
+        only honest test is to produce the file and check it from elsewhere.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            out = pathlib.Path(tmp) / "dist"
+            out.mkdir()
+            name = "hermes-webui-agent-v0.52.458-v2026.9.24-linux-arm64.tar.gz"
+            (out / name).write_bytes(b"not really a tarball, but it hashes fine\n")
+
+            cmd = self._extract_checksum_command()
+            subprocess.run(
+                ["bash", "-c", cmd],
+                cwd=REPO_ROOT,
+                env={**os.environ, "OUT_DIR": str(out), "TARBALL_NAME": name},
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            recorded = (out / "SHA256SUMS").read_text(encoding="utf-8").strip()
+            self.assertNotIn(
+                str(out),
+                recorded,
+                f"SHA256SUMS leaks the build path, so -c fails elsewhere: {recorded!r}",
+            )
+            self.assertIn(name, recorded)
+
+            # The user's move: both files in one folder, verify, from that folder.
+            download = pathlib.Path(tmp) / "downloads"
+            download.mkdir()
+            shutil.copy(out / name, download / name)
+            shutil.copy(out / "SHA256SUMS", download / "SHA256SUMS")
+            verified = subprocess.run(
+                ["sha256sum", "-c", "--strict", "SHA256SUMS"],
+                cwd=download,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(
+                verified.returncode,
+                0,
+                f"sha256sum -c failed outside the build tree:\n"
+                f"{verified.stdout}{verified.stderr}",
+            )
+            self.assertIn("OK", verified.stdout)
 
 
 if __name__ == "__main__":
